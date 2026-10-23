@@ -57,7 +57,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .loading-mark { display: grid; width: 52px; height: 52px; place-items: center; border-radius: 17px; background: #eaf3e9; color: #286448; animation: pulse 1.3s ease-in-out infinite; }
 
 .app-layout { min-height: 100vh; background: #f5f7f2; }
-.sidebar { position: fixed; z-index: 30; top: 0; bottom: 0; left: 0; display: flex; width: 246px; flex-direction: column; padding: 25px 17px 17px; background: linear-gradient(162deg, #173f35 0%, #1b493b 56%, #204a3b 100%); color: #fff; box-shadow: 6px 0 24px rgb(24 61 46 / 8%); }
+.sidebar { position: fixed; z-index: 30; top: 0; bottom: 0; left: 0; display: flex; width: 246px; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; padding: 25px 17px 17px; background: linear-gradient(162deg, #173f35 0%, #1b493b 56%, #204a3b 100%); color: #fff; box-shadow: 6px 0 24px rgb(24 61 46 / 8%); }
 .sidebar-brand { display: flex; align-items: center; justify-content: space-between; padding: 0 8px 32px; }
 .sidebar-caption { padding: 0 11px; color: rgb(225 241 226 / 42%); font-size: 9px; font-weight: 700; letter-spacing: 1.5px; }
 .sidebar-nav { display: grid; gap: 5px; margin-top: 13px; }
@@ -71,7 +71,8 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .nudge-spark { display: grid; width: 27px; height: 27px; place-items: center; border-radius: 9px; background: #d8f083; color: #22543c; }
 .profile-row { display: flex; align-items: center; gap: 10px; padding: 14px 6px 0; border-top: 1px solid rgb(230 244 230 / 12%); }
 .profile-avatar, .top-avatar { display: grid; width: 34px; height: 34px; flex: none; place-items: center; border-radius: 12px; background: #d8f083; color: #25573d; font-size: 11px; font-weight: 800; }
-.signout-button, .icon-button, .mobile-close { display: grid; width: 32px; height: 32px; flex: none; place-items: center; border: 0; border-radius: 9px; background: transparent; color: rgb(236 246 235 / 63%); transition: background .15s, color .15s; }
+.signout-button { display: flex; min-height: 36px; flex: none; align-items: center; justify-content: center; gap: 7px; padding: 0 9px; border: 0; border-radius: 9px; background: transparent; color: rgb(236 246 235 / 72%); font-size: 11px; font-weight: 600; transition: background .15s, color .15s; }
+.icon-button, .mobile-close { display: grid; width: 32px; height: 32px; flex: none; place-items: center; border: 0; border-radius: 9px; background: transparent; color: rgb(236 246 235 / 63%); transition: background .15s, color .15s; }
 .signout-button:hover, .mobile-close:hover { background: rgb(255 255 255 / 9%); color: white; }
 .mobile-close, .menu-button, .sidebar-overlay { display: none; }
 

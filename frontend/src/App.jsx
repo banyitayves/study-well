@@ -769,6 +769,7 @@ function App() {
     setPage('overview')
     setSelectedNote(null)
     setActiveQuiz(null)
+    setMobileMenu(false)
     setError('')
   }
 
@@ -791,7 +792,7 @@ function App() {
         </nav>
         <div className="sidebar-bottom">
           <div className="sidebar-nudge"><span className="nudge-spark"><Sparkles className="h-4 w-4" /></span><p className="mt-3 text-[12px] font-bold text-white">Small steps count.</p><p className="mt-1 text-[10px] leading-4 text-white/55">A few minutes of learning today can take you far.</p><button onClick={() => openPage('notes')} className="mt-3 text-[10px] font-bold text-lime">Let’s go <ArrowRight className="ml-1 inline h-3 w-3" /></button></div>
-          <div className="profile-row"><span className="profile-avatar">{initials(user.name)}</span><span className="min-w-0 flex-1"><span className="block truncate text-[12px] font-semibold text-white">{user.name}</span><span className="mt-0.5 block truncate text-[10px] text-white/50">{user.role === 'admin' ? 'Teacher' : 'Student'}</span></span><button aria-label="Sign out" title="Sign out" onClick={signOut} className="signout-button"><LogOut className="h-4 w-4" /></button></div>
+          <div className="profile-row"><span className="profile-avatar">{initials(user.name)}</span><span className="min-w-0 flex-1"><span className="block truncate text-[12px] font-semibold text-white">{user.name}</span><span className="mt-0.5 block truncate text-[10px] text-white/50">{user.role === 'admin' ? 'Teacher' : 'Student'}</span></span><button aria-label="Sign out" title="Sign out" onClick={signOut} className="signout-button"><LogOut className="h-4 w-4" /><span>Sign out</span></button></div>
         </div>
       </aside>
 
