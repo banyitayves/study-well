@@ -40,6 +40,9 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .story-card { animation: float-in 6s ease-in-out infinite; }
 .avatar-dot { display: grid; width: 30px; height: 30px; place-items: center; border: 2px solid #1d493d; border-radius: 50%; color: #fff; font-size: 9px; font-weight: 700; }
 .form-label { display: block; color: #49584f; font-size: 12px; font-weight: 700; }
+.account-type-card { display: block; padding: 12px; border: 1px solid #e2e9e1; border-radius: 11px; background: #fff; cursor: pointer; }
+.account-type-card:hover, .account-type-selected { border-color: #6e9a79; background: #f5faf3; box-shadow: 0 0 0 3px rgb(74 130 88 / 8%); }
+.account-type-card:focus-within { outline: 2px solid #6e9a79; outline-offset: 2px; }
 .form-label input, .form-label select { display: block; width: 100%; height: 48px; margin-top: 8px; padding: 0 14px; border: 1px solid #e2e9e1; border-radius: 11px; outline: none; background: #fff; color: #202f28; font-size: 13px; transition: border-color .15s, box-shadow .15s; }
 .form-label input::placeholder { color: #a9b2aa; }
 .form-label input:focus, .form-label select:focus { border-color: #6e9a79; box-shadow: 0 0 0 3px rgb(74 130 88 / 10%); }

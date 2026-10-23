@@ -46,6 +46,13 @@ const navigation = [
   { id: 'quizzes', label: 'Quizzes', icon: Target },
   { id: 'progress', label: 'My progress', icon: Award },
 ]
+const teacherNavigation = [
+  { id: 'overview', label: 'Teacher dashboard', icon: Sparkles },
+  { id: 'manage-quizzes', label: 'Manage quizzes', icon: FileUp },
+  { id: 'subjects', label: 'Subjects', icon: GraduationCap },
+  { id: 'notes', label: 'Study notes', icon: BookOpen },
+  { id: 'quizzes', label: 'Student quizzes', icon: Target },
+]
 
 async function api(path, options = {}) {
   const token = localStorage.getItem(TOKEN_KEY)
@@ -98,13 +105,16 @@ function parseQuizCsv(text) {
   if (row.some(Boolean)) rows.push(row)
   if (rows.length < 2) throw new Error('The CSV must include a header row and at least one question.')
 
-  const headers = rows[0].map((header) => header.trim().toLowerCase())
-  const requiredHeaders = ['question', 'choice_a', 'choice_b', 'choice_c', 'choice_d', 'correct_answer', 'explanation']
+  const headers = rows[0].map((header) => {
+    const normalized = header.trim().toLowerCase()
+    return normalized === 'explanation (optional)' ? 'explanation' : normalized
+  })
+  const requiredHeaders = ['question', 'choice_a', 'choice_b', 'choice_c', 'choice_d', 'correct_answer']
   const missingHeaders = requiredHeaders.filter((header) => !headers.includes(header))
   if (missingHeaders.length) throw new Error(`CSV is missing these columns: ${missingHeaders.join(', ')}.`)
   if (new Set(headers).size !== headers.length) throw new Error('The CSV contains duplicate column names.')
 
-  const column = Object.fromEntries(requiredHeaders.map((header) => [header, headers.indexOf(header)]))
+  const column = Object.fromEntries([...requiredHeaders, 'explanation'].map((header) => [header, headers.indexOf(header)]))
   const questions = rows.slice(1).map((values, index) => {
     const question = {
       prompt: values[column.question] || '',
@@ -113,10 +123,10 @@ function parseQuizCsv(text) {
       choiceC: values[column.choice_c] || '',
       choiceD: values[column.choice_d] || '',
       correctAnswer: (values[column.correct_answer] || '').toUpperCase(),
-      explanation: values[column.explanation] || '',
+      explanation: column.explanation === undefined ? '' : values[column.explanation] || '',
     }
-    if (Object.values(question).some((value) => !value)) {
-      throw new Error(`Question row ${index + 2} has an empty field. Fill all columns before importing.`)
+    if ([question.prompt, question.choiceA, question.choiceB, question.choiceC, question.choiceD].some((value) => !value)) {
+      throw new Error(`Question row ${index + 2} needs a question and all four choices.`)
     }
     if (!['A', 'B', 'C', 'D'].includes(question.correctAnswer)) {
       throw new Error(`Question row ${index + 2} must use A, B, C, or D in correct_answer.`)
@@ -158,7 +168,7 @@ function Brand({ light = false }) {
 
 function AuthPage({ onSignedIn }) {
   const [mode, setMode] = useState('register')
-  const [form, setForm] = useState({ name: '', email: '', password: '', adminSetupToken: '' })
+  const [form, setForm] = useState({ name: '', email: '', password: '', role: 'student', adminSetupToken: '' })
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -225,9 +235,10 @@ function AuthPage({ onSignedIn }) {
           </div>
           <form onSubmit={submit} className="space-y-4">
             {mode === 'register' && <label className="form-label">Your name<input autoComplete="name" required minLength={2} maxLength={100} value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="e.g. Alex Morgan" /></label>}
+            {mode === 'register' && <fieldset className="space-y-2"><legend className="form-label">I am registering as a</legend><div className="grid grid-cols-2 gap-3">{[['student', 'Student', 'Study notes and take quizzes'], ['teacher', 'Teacher', 'Upload quizzes and answer keys']].map(([role, title, description]) => <label key={role} className={`account-type-card ${form.role === role ? 'account-type-selected' : ''}`}><input className="sr-only" type="radio" name="accountType" value={role} checked={form.role === role} onChange={() => setForm({ ...form, role })} /><span className="text-[13px] font-bold text-ink">{title}</span><span className="mt-1 block text-[10px] leading-4 text-muted">{description}</span></label>)}</div></fieldset>}
             <label className="form-label">Email address<input type="email" autoComplete="email" required value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="you@example.com" /></label>
             <label className="form-label">Password<input type="password" autoComplete={mode === 'register' ? 'new-password' : 'current-password'} minLength={mode === 'register' ? 8 : undefined} required value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} placeholder={mode === 'register' ? 'At least 8 characters' : 'Enter your password'} /></label>
-            <label className="form-label">Teacher setup code <span className="font-normal text-muted">(optional; provided by your teacher)</span><input type="password" autoComplete="off" value={form.adminSetupToken} onChange={(event) => setForm({ ...form, adminSetupToken: event.target.value })} placeholder="Students can leave this blank" /></label>
+            {((mode === 'register' && form.role === 'teacher') || mode === 'login') && <label className="form-label">Teacher setup code {mode === 'login' && <span className="font-normal text-muted">(optional)</span>}<input type="password" autoComplete="off" required={mode === 'register' && form.role === 'teacher'} value={form.adminSetupToken} onChange={(event) => setForm({ ...form, adminSetupToken: event.target.value })} placeholder={mode === 'login' ? 'Only needed to activate teacher access' : 'Enter the code provided by your school'} /></label>}
             {error && <p className="form-error" role="alert">{error}</p>}
             <button disabled={busy} className="primary-button mt-2 w-full justify-center py-3.5">{busy ? 'One moment…' : mode === 'register' ? 'Create my account' : 'Sign in'}<ArrowRight className="h-4 w-4" /></button>
           </form>
@@ -415,6 +426,8 @@ function QuizManager({ subjects, onUpdated }) {
   const [selectedQuizId, setSelectedQuizId] = useState('')
   const [file, setFile] = useState(null)
   const uploadInputRef = useRef(null)
+  const [newQuizFile, setNewQuizFile] = useState(null)
+  const newQuizUploadRef = useRef(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
@@ -430,6 +443,35 @@ function QuizManager({ subjects, onUpdated }) {
   useEffect(() => {
     loadQuizzes().catch((requestError) => setError(requestError.message))
   }, [])
+
+  async function createAndPublishQuiz(event) {
+    event.preventDefault()
+    if (!newQuizFile) {
+      setError('Choose a questions CSV file before publishing the quiz.')
+      return
+    }
+    setBusy(true)
+    setError('')
+    setMessage('')
+    try {
+      const questions = parseQuizCsv(await newQuizFile.text())
+      const { quiz, imported } = await api('/admin/quizzes/import', {
+        method: 'POST',
+        body: JSON.stringify({ ...quizForm, questions }),
+      })
+      await loadQuizzes()
+      setSelectedQuizId(String(quiz.id))
+      setQuizForm({ subjectId: quizForm.subjectId, title: '', description: '', durationMinutes: 10 })
+      setNewQuizFile(null)
+      if (newQuizUploadRef.current) newQuizUploadRef.current.value = ''
+      setMessage(`Published "${quiz.title}" with ${imported} questions. Students can take it and receive their marks automatically.`)
+      await onUpdated()
+    } catch (requestError) {
+      setError(requestError.message)
+    } finally {
+      setBusy(false)
+    }
+  }
 
   async function createQuiz(event) {
     event.preventDefault()
@@ -487,7 +529,7 @@ function QuizManager({ subjects, onUpdated }) {
 
   function downloadTemplate() {
     const template = [
-      'question,choice_a,choice_b,choice_c,choice_d,correct_answer,explanation',
+      'question,choice_a,choice_b,choice_c,choice_d,correct_answer,explanation (optional)',
       '"Which fraction equals 1/2?","2/3","3/8","4/8","5/8","C","4/8 simplifies to 1/2."',
       '"What is 3 + 4?","5","6","7","8","C","Adding 3 and 4 gives 7."',
     ].join('\r\n')
@@ -504,6 +546,19 @@ function QuizManager({ subjects, onUpdated }) {
       <PageHeading eyebrow="TEACHER TOOLS" title="Manage quizzes" description="Create a quiz, upload its questions and answer key, then let students practise and see their marks." />
       {error && <p className="form-error mt-5" role="alert">{error}</p>}
       {message && <p className="success-message mt-5" role="status">{message}</p>}
+      <section className="section-block mt-6">
+        <SectionTitle title="Create and publish a quiz" subtitle="Upload the questions and answer key together. Students can take it as soon as it is saved." />
+        <form onSubmit={createAndPublishQuiz} className="mt-5 grid gap-4 sm:grid-cols-2">
+          <label className="form-label">Subject<select required value={quizForm.subjectId} onChange={(event) => setQuizForm({ ...quizForm, subjectId: event.target.value })}><option value="">Choose a subject</option>{subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}</select></label>
+          <label className="form-label">Quiz title<input required maxLength={180} value={quizForm.title} onChange={(event) => setQuizForm({ ...quizForm, title: event.target.value })} placeholder="e.g. Fractions practice" /></label>
+          <label className="form-label sm:col-span-2">Description<input required maxLength={500} value={quizForm.description} onChange={(event) => setQuizForm({ ...quizForm, description: event.target.value })} placeholder="What will students practise?" /></label>
+          <label className="form-label">Time allowed (minutes)<input required type="number" min="1" max="255" value={quizForm.durationMinutes} onChange={(event) => setQuizForm({ ...quizForm, durationMinutes: Number(event.target.value) })} /></label>
+          <div className="rounded-xl bg-[#f5f7f2] p-4 text-[11px] leading-5 text-muted">CSV columns: question, four choices, and correct_answer (A-D). Explanations are optional. Scores are marked automatically from the answer key.</div>
+          <label className="upload-box sm:col-span-2"><FileUp className="h-5 w-5 text-green" /><span className="text-[12px] font-bold text-ink">{newQuizFile?.name || 'Choose a questions CSV file'}</span><span className="text-[10px] text-muted">CSV format - up to 100 questions</span><input ref={newQuizUploadRef} type="file" accept=".csv,text/csv" onChange={(event) => { setNewQuizFile(event.target.files?.[0] || null); setError(''); setMessage('') }} /></label>
+          <button type="button" onClick={downloadTemplate} className="text-left text-[11px] font-bold text-green hover:underline">Download CSV template</button>
+          <button disabled={busy || !subjects.length || !newQuizFile} className="primary-button sm:col-span-2"><Plus className="h-4 w-4" />{busy ? 'Publishing...' : 'Create quiz and publish'}</button>
+        </form>
+      </section>
       <div className="mt-6 grid items-start gap-5 xl:grid-cols-2">
         <section className="section-block">
           <SectionTitle title="1. Create a quiz" subtitle="Choose the subject students will find it under." />
@@ -580,6 +635,35 @@ function SectionTitle({ title, subtitle, action, onAction }) {
 
 function PageHeading({ eyebrow, title, description }) {
   return <div><p className="text-[10px] font-bold uppercase tracking-[1.5px] text-green">{eyebrow}</p><h1 className="mt-2 font-display text-[30px] font-bold tracking-[-1.1px] text-ink">{title}</h1><p className="mt-1 text-[13px] leading-6 text-muted">{description}</p></div>
+}
+
+function TeacherOverview({ userName, subjects, openPage }) {
+  const [quizzes, setQuizzes] = useState([])
+  const [error, setError] = useState('')
+  useEffect(() => {
+    api('/admin/quizzes').then(({ quizzes: available }) => setQuizzes(available)).catch((requestError) => setError(requestError.message))
+  }, [])
+  const published = quizzes.filter((quiz) => Number(quiz.question_count) > 0).length
+  const drafts = quizzes.length - published
+  return (
+    <div>
+      <PageHeading eyebrow="TEACHER WORKSPACE" title={`Welcome, ${userName}`} description="Create quizzes, add answer keys, and help students practise with instantly marked results." />
+      <div className="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <StatCard icon={GraduationCap} label="Available subjects" value={subjects.length} detail="Organize learning by subject" tint="green" />
+        <StatCard icon={CheckCircle2} label="Published quizzes" value={published} detail="Live for students to take" tint="sky" />
+        <StatCard icon={FileUp} label="Draft quizzes" value={drafts} detail="Upload questions to publish" tint="amber" />
+      </div>
+      <section className="section-block mt-6">
+        <SectionTitle title="Your teacher tools" subtitle="Upload questions and answer keys in one step. Student scores are calculated automatically." />
+        <button onClick={() => openPage('manage-quizzes')} className="primary-button mt-5"><FileUp className="h-4 w-4" />Create or manage quizzes</button>
+      </section>
+      <section className="section-block mt-5">
+        <SectionTitle title="Quiz publishing" subtitle="A quiz appears in the student dashboard as soon as its questions and answer key are saved." />
+        {error && <p className="form-error mt-4" role="alert">{error}</p>}
+        {quizzes.length ? <div className="mt-4 divide-y divide-[#edf0ea]">{quizzes.slice(0, 5).map((quiz) => <div key={quiz.id} className="flex flex-wrap items-center justify-between gap-3 py-3"><div><p className="text-[13px] font-bold text-ink">{quiz.title}</p><p className="mt-1 text-[11px] text-muted">{quiz.subject_name} - {quiz.question_count} questions</p></div><span className={`rounded-full px-3 py-1.5 text-[10px] font-bold ${Number(quiz.question_count) ? 'bg-green-pale text-green' : 'bg-amber-50 text-amber-700'}`}>{Number(quiz.question_count) ? 'PUBLISHED' : 'DRAFT'}</span></div>)}</div> : <p className="mt-4 text-[12px] text-muted">Create your first quiz and upload its answer key to get started.</p>}
+      </section>
+    </div>
+  )
 }
 
 function App() {
@@ -692,16 +776,16 @@ function App() {
   if (!user) return <AuthPage onSignedIn={setUser} />
 
   const selectedSubject = subjects.find((subject) => String(subject.id) === subjectFilter)
-  const pageTitle = { overview: 'A fresh day to learn', subjects: 'Your subjects', notes: 'Study notes', quizzes: 'Quick quizzes', progress: 'Your progress', 'manage-quizzes': 'Manage quizzes' }[page]
-  const visibleNavigation = user.role === 'admin'
-    ? [...navigation, { id: 'manage-quizzes', label: 'Manage quizzes', icon: FileUp }]
-    : navigation
+  const pageTitle = user.role === 'admin'
+    ? { overview: 'Teacher dashboard', subjects: 'Subjects', notes: 'Study notes', quizzes: 'Student quizzes', 'manage-quizzes': 'Manage quizzes' }[page]
+    : { overview: 'A fresh day to learn', subjects: 'Your subjects', notes: 'Study notes', quizzes: 'Quick quizzes', progress: 'Your progress' }[page]
+  const visibleNavigation = user.role === 'admin' ? teacherNavigation : navigation
 
   return (
     <div className="app-layout">
       <aside className={`sidebar ${mobileMenu ? 'sidebar-open' : ''}`}>
         <div className="sidebar-brand"><Brand light /><button aria-label="Close menu" onClick={() => setMobileMenu(false)} className="mobile-close"><X className="h-5 w-5" /></button></div>
-        <div className="sidebar-caption">YOUR STUDY SPACE</div>
+        <div className="sidebar-caption">{user.role === 'admin' ? 'TEACHER WORKSPACE' : 'YOUR STUDY SPACE'}</div>
         <nav className="sidebar-nav">
           {visibleNavigation.map(({ id, label, icon: Icon }) => <button key={id} onClick={() => openPage(id)} className={`nav-item ${page === id ? 'nav-active' : ''}`}><Icon className="h-[17px] w-[17px]" strokeWidth={1.8} />{label}{id === 'quizzes' && <span className="nav-count">{quizzes.length}</span>}</button>)}
         </nav>
@@ -716,7 +800,7 @@ function App() {
       <div className="main-area">
         <header className="topbar">
           <button aria-label="Open menu" onClick={() => setMobileMenu(true)} className="menu-button"><Menu className="h-5 w-5" /></button>
-          <div className="topbar-crumb"><span>My learning</span><ChevronRight className="h-3 w-3" /><strong>{pageTitle}</strong></div>
+          <div className="topbar-crumb"><span>{user.role === 'admin' ? 'Teacher tools' : 'My learning'}</span><ChevronRight className="h-3 w-3" /><strong>{pageTitle}</strong></div>
           <div className="topbar-right"><span className="today-label">{new Intl.DateTimeFormat('en', { weekday: 'short', month: 'short', day: 'numeric' }).format(new Date())}</span><span className="top-avatar">{initials(user.name)}</span></div>
         </header>
 
@@ -726,7 +810,7 @@ function App() {
 
           {activeQuiz ? <QuizPanel quiz={activeQuiz} onBack={() => setActiveQuiz(null)} onSubmitted={refreshData} /> : (
             <>
-              {page === 'overview' && <Overview userName={displayName} subjects={subjects} notes={notes} quizzes={quizzes} progress={progress} openPage={openPage} openNote={openNote} chooseSubject={chooseSubject} setActiveQuiz={setActiveQuiz} />}
+              {page === 'overview' && (user.role === 'admin' ? <TeacherOverview userName={displayName} subjects={subjects} openPage={openPage} /> : <Overview userName={displayName} subjects={subjects} notes={notes} quizzes={quizzes} progress={progress} openPage={openPage} openNote={openNote} chooseSubject={chooseSubject} setActiveQuiz={setActiveQuiz} />)}
               {page === 'subjects' && <div><PageHeading eyebrow="YOUR LEARNING LIBRARY" title="Your subjects" description="Pick a subject and follow your curiosity." /><div className="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{subjects.map((subject) => <SubjectCard key={subject.id} subject={subject} onClick={() => chooseSubject(subject)} />)}</div></div>}
               {page === 'notes' && <div><PageHeading eyebrow="READ, REVISIT, REMEMBER" title={selectedSubject ? `${selectedSubject.name} notes` : 'Study notes'} description={selectedSubject?.description || 'Friendly explainers to help new ideas stick.'} /><div className="library-toolbar"><div className="search-box"><Search className="h-4 w-4" /><input aria-label="Search notes" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Find a note…" /></div><select aria-label="Filter by subject" value={subjectFilter} onChange={(event) => setSubjectFilter(event.target.value)}><option value="all">All subjects</option>{subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}</select></div>{filteredNotes.length ? <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{filteredNotes.map((note) => <NoteCard key={note.id} note={note} onClick={() => openNote(note.id)} />)}</div> : <EmptyState title="No notes found" text="Try a different search or choose another subject." action="Show all subjects" onAction={() => { setSearch(''); setSubjectFilter('all') }} />}</div>}
               {page === 'quizzes' && <div><PageHeading eyebrow="A LITTLE PRACTICE GOES A LONG WAY" title={selectedSubject ? `${selectedSubject.name} quizzes` : 'Quick quizzes'} description="Try a few questions and see what you already know." /><div className="library-toolbar"><div className="search-box"><Search className="h-4 w-4" /><input aria-label="Search quizzes" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Find a quiz…" /></div><select aria-label="Filter by subject" value={subjectFilter} onChange={(event) => setSubjectFilter(event.target.value)}><option value="all">All subjects</option>{subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}</select></div>{filteredQuizzes.length ? <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{filteredQuizzes.map((quiz) => <QuizCard key={quiz.id} quiz={quiz} onStart={() => setActiveQuiz(quiz)} />)}</div> : <EmptyState title="No quizzes found" text="Try a different search or choose another subject." action="Show all subjects" onAction={() => { setSearch(''); setSubjectFilter('all') }} />}</div>}

@@ -23,17 +23,25 @@ app.post('/api/auth/register', async (req, res) => {
   const name = typeof req.body.name === 'string' ? req.body.name.trim() : ''
   const email = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : ''
   const password = typeof req.body.password === 'string' ? req.body.password : ''
+  const requestedRole = req.body.role || 'student'
   if (name.length < 2 || name.length > 100) return res.status(400).json({ error: 'Name must be between 2 and 100 characters.' })
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 190) return res.status(400).json({ error: 'Enter a valid email address.' })
   if (password.length < 8 || password.length > 72) return res.status(400).json({ error: 'Password must be between 8 and 72 characters.' })
+  if (!['student', 'teacher'].includes(requestedRole)) return res.status(400).json({ error: 'Choose student or teacher for your account.' })
   const isConfiguredAdmin = email === config.adminEmail && Boolean(config.adminEmail)
   const validAdminToken = isValidAdminSetupToken(req.body.adminSetupToken)
+  if (requestedRole === 'teacher' && !isConfiguredAdmin) {
+    return res.status(403).json({ error: 'Teacher registration is limited to the configured teacher account. Check the email address or contact your administrator.' })
+  }
+  if (requestedRole === 'teacher' && !validAdminToken) {
+    return res.status(403).json({ error: 'The teacher setup code is incorrect.' })
+  }
   if (isConfiguredAdmin && req.body.adminSetupToken && !validAdminToken) {
     return res.status(403).json({ error: 'The teacher setup code is incorrect.' })
   }
 
   const passwordHash = await bcrypt.hash(password, 12)
-  const role = isConfiguredAdmin && validAdminToken ? 'admin' : 'student'
+  const role = requestedRole === 'teacher' ? 'admin' : 'student'
   try {
     const [result] = await pool.execute(
       'INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)',
@@ -168,27 +176,24 @@ app.post('/api/admin/quizzes', authenticate, requireAdmin, async (req, res) => {
   res.status(201).json({ quiz: { id: result.insertId, subject_id: subjectId, title, description, duration_minutes: durationMinutes, question_count: 0 } })
 })
 
-app.put('/api/admin/quizzes/:id/questions', authenticate, requireAdmin, async (req, res) => {
-  const quizId = Number(req.params.id)
-  const questions = req.body.questions
-  if (!Number.isSafeInteger(quizId) || quizId < 1) return res.status(400).json({ error: 'Choose a valid quiz.' })
+function normalizeQuestions(quizId, questions) {
   if (!Array.isArray(questions) || questions.length < 1 || questions.length > 100) {
-    return res.status(400).json({ error: 'Upload between 1 and 100 questions.' })
+    return { error: 'Upload between 1 and 100 questions.' }
   }
   const normalized = []
   for (const [index, question] of questions.entries()) {
-    const fields = ['prompt', 'choiceA', 'choiceB', 'choiceC', 'choiceD', 'explanation']
+    const fields = ['prompt', 'choiceA', 'choiceB', 'choiceC', 'choiceD']
     if (!question || fields.some((field) => typeof question[field] !== 'string' || !question[field].trim())) {
-      return res.status(400).json({ error: `Question ${index + 1} is missing its question text, four choices, or explanation.` })
+      return { error: `Question ${index + 1} is missing its question text or one of its four choices.` }
     }
     if (question.prompt.trim().length > 500
       || [question.choiceA, question.choiceB, question.choiceC, question.choiceD].some((choice) => choice.trim().length > 255)
-      || question.explanation.trim().length > 500) {
-      return res.status(400).json({ error: `Question ${index + 1} exceeds the allowed text length.` })
+      || (typeof question.explanation === 'string' && question.explanation.trim().length > 500)) {
+      return { error: `Question ${index + 1} exceeds the allowed text length.` }
     }
     const answer = typeof question.correctAnswer === 'string' ? question.correctAnswer.trim().toUpperCase() : ''
     if (!['A', 'B', 'C', 'D'].includes(answer)) {
-      return res.status(400).json({ error: `Question ${index + 1} must have correct_answer set to A, B, C, or D.` })
+      return { error: `Question ${index + 1} must have correct_answer set to A, B, C, or D.` }
     }
     normalized.push([
       quizId,
@@ -198,10 +203,64 @@ app.put('/api/admin/quizzes/:id/questions', authenticate, requireAdmin, async (r
       question.choiceC.trim(),
       question.choiceD.trim(),
       answer,
-      question.explanation.trim(),
+      typeof question.explanation === 'string' ? question.explanation.trim() : '',
       index + 1,
     ])
   }
+  return { questions: normalized }
+}
+
+app.post('/api/admin/quizzes/import', authenticate, requireAdmin, async (req, res) => {
+  const subjectId = Number(req.body.subjectId)
+  const title = typeof req.body.title === 'string' ? req.body.title.trim() : ''
+  const description = typeof req.body.description === 'string' ? req.body.description.trim() : ''
+  const durationMinutes = Number(req.body.durationMinutes)
+  if (!Number.isSafeInteger(subjectId) || subjectId < 1) return res.status(400).json({ error: 'Choose a valid subject.' })
+  if (!title || title.length > 180) return res.status(400).json({ error: 'Quiz title is required and must be at most 180 characters.' })
+  if (!description || description.length > 500) return res.status(400).json({ error: 'Quiz description is required and must be at most 500 characters.' })
+  if (!Number.isInteger(durationMinutes) || durationMinutes < 1 || durationMinutes > 255) {
+    return res.status(400).json({ error: 'Duration must be between 1 and 255 minutes.' })
+  }
+  const normalized = normalizeQuestions(0, req.body.questions)
+  if (normalized.error) return res.status(400).json({ error: normalized.error })
+
+  const connection = await pool.getConnection()
+  try {
+    await connection.beginTransaction()
+    const [subjects] = await connection.execute('SELECT id FROM subjects WHERE id = ?', [subjectId])
+    if (!subjects.length) {
+      await connection.rollback()
+      return res.status(400).json({ error: 'Choose a valid subject.' })
+    }
+    const [quizResult] = await connection.execute(
+      'INSERT INTO quizzes (subject_id, title, description, duration_minutes) VALUES (?, ?, ?, ?)',
+      [subjectId, title, description, durationMinutes],
+    )
+    const quizId = quizResult.insertId
+    await connection.query(
+      `INSERT INTO quiz_questions
+        (quiz_id, prompt, choice_a, choice_b, choice_c, choice_d, correct_answer, explanation, sort_order)
+       VALUES ?`,
+      [normalized.questions.map(([, ...question]) => [quizId, ...question])],
+    )
+    await connection.commit()
+    res.status(201).json({
+      quiz: { id: quizId, subject_id: subjectId, title, description, duration_minutes: durationMinutes, question_count: normalized.questions.length },
+      imported: normalized.questions.length,
+    })
+  } catch (error) {
+    await connection.rollback()
+    throw error
+  } finally {
+    connection.release()
+  }
+})
+
+app.put('/api/admin/quizzes/:id/questions', authenticate, requireAdmin, async (req, res) => {
+  const quizId = Number(req.params.id)
+  if (!Number.isSafeInteger(quizId) || quizId < 1) return res.status(400).json({ error: 'Choose a valid quiz.' })
+  const normalized = normalizeQuestions(quizId, req.body.questions)
+  if (normalized.error) return res.status(400).json({ error: normalized.error })
 
   const connection = await pool.getConnection()
   try {
@@ -216,7 +275,7 @@ app.put('/api/admin/quizzes/:id/questions', authenticate, requireAdmin, async (r
       `INSERT INTO quiz_questions
         (quiz_id, prompt, choice_a, choice_b, choice_c, choice_d, correct_answer, explanation, sort_order)
        VALUES ?`,
-      [normalized],
+      [normalized.questions],
     )
     await connection.commit()
   } catch (error) {
@@ -225,7 +284,7 @@ app.put('/api/admin/quizzes/:id/questions', authenticate, requireAdmin, async (r
   } finally {
     connection.release()
   }
-  res.json({ imported: normalized.length })
+  res.json({ imported: normalized.questions.length })
 })
 
 app.get('/api/quizzes/:id', authenticate, async (req, res) => {

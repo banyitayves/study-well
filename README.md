@@ -34,21 +34,21 @@ Students can create an account, explore subjects and notes, take quizzes, and tr
    npm run dev
    ```
 
-5. Open <http://localhost:5173> and create a student account.
+5. Open <http://localhost:5173> and choose whether to register as a student or teacher. Teacher registration also requires the configured teacher email and setup code.
 
 The starter library includes Mathematics, Biology, Physics, Chemistry, and English content. The first account is created through the registration form; there is no shared demo password.
 
 ## Teachers: upload quizzes
 
-Set `ADMIN_EMAIL` to the teacher's account email and `ADMIN_SETUP_TOKEN` to a unique random secret of at least 24 characters in the backend environment. The teacher enters that code in the optional **Teacher setup code** field when registering or signing in with that email. Students leave it blank. The code is never shown in the app, and the quiz-management API checks the teacher role on the server. Keep both values private to the backend environment.
+Set `ADMIN_EMAIL` to the teacher's account email and `ADMIN_SETUP_TOKEN` to a unique random secret of at least 24 characters in the backend environment. A teacher must choose **Teacher** at registration and provide both the configured email and setup code; student registration cannot grant teacher privileges. The code is also accepted at sign-in to activate the configured teacher account. The code is never shown in the app, and the quiz-management API checks the teacher role on the server. Keep both values private to the backend environment.
 
-In **Manage quizzes**, create a quiz under a subject and download the CSV template. Fill one question per row with these columns:
+In the teacher dashboard, create and publish a quiz in one step: choose a subject, enter its title and description, set the time limit, and upload the questions CSV. Download the CSV template from **Manage quizzes**. Fill one question per row with these columns:
 
 ```text
-question,choice_a,choice_b,choice_c,choice_d,correct_answer,explanation
+question,choice_a,choice_b,choice_c,choice_d,correct_answer,explanation (optional)
 ```
 
-`correct_answer` must be `A`, `B`, `C`, or `D`. Uploading a replacement CSV replaces that quiz's existing question set. Draft quizzes are not shown to students until at least one question is uploaded. Students select answers, submit the quiz, and see their score and the explanations based on the teacher's answer key.
+`correct_answer` must be `A`, `B`, `C`, or `D`. Explanations are optional. Publishing saves the quiz and its answer key together; there is no empty draft between creation and upload. Existing quizzes can still have their question set replaced. Students select answers, submit the quiz, and see their automatically calculated score and any explanations. Answer keys stay server-side until grading.
 
 ## Vercel deployment and TiDB Cloud
 
