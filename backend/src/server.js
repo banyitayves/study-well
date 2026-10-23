@@ -191,16 +191,20 @@ app.use((error, _req, res, _next) => {
   res.status(500).json({ error: 'Something went wrong. Please try again.' })
 })
 
-const server = app.listen(config.port, '0.0.0.0', () => {
-  console.log(`Study Space API listening on port ${config.port}.`)
-})
-
-async function shutdown() {
-  server.close(async () => {
-    await pool.end()
-    process.exit(0)
+if (process.env.VERCEL !== '1') {
+  const server = app.listen(config.port, '0.0.0.0', () => {
+    console.log(`Study Space API listening on port ${config.port}.`)
   })
+
+  async function shutdown() {
+    server.close(async () => {
+      await pool.end()
+      process.exit(0)
+    })
+  }
+
+  process.on('SIGINT', shutdown)
+  process.on('SIGTERM', shutdown)
 }
 
-process.on('SIGINT', shutdown)
-process.on('SIGTERM', shutdown)
+export default app
