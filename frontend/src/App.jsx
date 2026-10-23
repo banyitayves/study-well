@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowDownRight,
   ArrowLeft,
@@ -10,6 +10,8 @@ import {
   CheckCircle2,
   ChevronRight,
   Clock3,
+  Download,
+  FileUp,
   FlaskConical,
   GraduationCap,
   Leaf,
@@ -21,6 +23,7 @@ import {
   PenLine,
   Pi,
   Play,
+  Plus,
   Search,
   Sparkles,
   Target,
@@ -46,17 +49,82 @@ const navigation = [
 
 async function api(path, options = {}) {
   const token = localStorage.getItem(TOKEN_KEY)
-  const response = await fetch(`/api${path}`, {
-    ...options,
-    headers: {
-      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...options.headers,
-    },
-  })
+  let response
+  try {
+    response = await fetch(`/api${path}`, {
+      ...options,
+      headers: {
+        ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...options.headers,
+      },
+    })
+  } catch {
+    throw new Error('Cannot reach the study API. Check the Vercel backend service and its deployment status.')
+  }
   const payload = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(payload.error || 'Something went wrong. Please try again.')
+  if (!response.ok) throw new Error(payload.error || `The study API returned an error (${response.status}). Check the Vercel function logs.`)
   return payload
+}
+
+function parseQuizCsv(text) {
+  const rows = []
+  let row = []
+  let cell = ''
+  let quoted = false
+  const source = text.replace(/^\uFEFF/, '')
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index]
+    if (quoted && character === '"' && source[index + 1] === '"') {
+      cell += '"'
+      index += 1
+    } else if (character === '"') {
+      quoted = !quoted
+    } else if (!quoted && character === ',') {
+      row.push(cell.trim())
+      cell = ''
+    } else if (!quoted && (character === '\n' || character === '\r')) {
+      if (character === '\r' && source[index + 1] === '\n') index += 1
+      row.push(cell.trim())
+      if (row.some(Boolean)) rows.push(row)
+      row = []
+      cell = ''
+    } else {
+      cell += character
+    }
+  }
+  if (quoted) throw new Error('The CSV has an unclosed quotation mark.')
+  row.push(cell.trim())
+  if (row.some(Boolean)) rows.push(row)
+  if (rows.length < 2) throw new Error('The CSV must include a header row and at least one question.')
+
+  const headers = rows[0].map((header) => header.trim().toLowerCase())
+  const requiredHeaders = ['question', 'choice_a', 'choice_b', 'choice_c', 'choice_d', 'correct_answer', 'explanation']
+  const missingHeaders = requiredHeaders.filter((header) => !headers.includes(header))
+  if (missingHeaders.length) throw new Error(`CSV is missing these columns: ${missingHeaders.join(', ')}.`)
+  if (new Set(headers).size !== headers.length) throw new Error('The CSV contains duplicate column names.')
+
+  const column = Object.fromEntries(requiredHeaders.map((header) => [header, headers.indexOf(header)]))
+  const questions = rows.slice(1).map((values, index) => {
+    const question = {
+      prompt: values[column.question] || '',
+      choiceA: values[column.choice_a] || '',
+      choiceB: values[column.choice_b] || '',
+      choiceC: values[column.choice_c] || '',
+      choiceD: values[column.choice_d] || '',
+      correctAnswer: (values[column.correct_answer] || '').toUpperCase(),
+      explanation: values[column.explanation] || '',
+    }
+    if (Object.values(question).some((value) => !value)) {
+      throw new Error(`Question row ${index + 2} has an empty field. Fill all columns before importing.`)
+    }
+    if (!['A', 'B', 'C', 'D'].includes(question.correctAnswer)) {
+      throw new Error(`Question row ${index + 2} must use A, B, C, or D in correct_answer.`)
+    }
+    return question
+  })
+  if (questions.length > 100) throw new Error('A quiz can contain at most 100 questions per upload.')
+  return questions
 }
 
 function initials(name = '') {
@@ -90,7 +158,7 @@ function Brand({ light = false }) {
 
 function AuthPage({ onSignedIn }) {
   const [mode, setMode] = useState('register')
-  const [form, setForm] = useState({ name: '', email: '', password: '' })
+  const [form, setForm] = useState({ name: '', email: '', password: '', adminSetupToken: '' })
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -159,6 +227,7 @@ function AuthPage({ onSignedIn }) {
             {mode === 'register' && <label className="form-label">Your name<input autoComplete="name" required minLength={2} maxLength={100} value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="e.g. Alex Morgan" /></label>}
             <label className="form-label">Email address<input type="email" autoComplete="email" required value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="you@example.com" /></label>
             <label className="form-label">Password<input type="password" autoComplete={mode === 'register' ? 'new-password' : 'current-password'} minLength={mode === 'register' ? 8 : undefined} required value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} placeholder={mode === 'register' ? 'At least 8 characters' : 'Enter your password'} /></label>
+            <label className="form-label">Teacher setup code <span className="font-normal text-muted">(optional; provided by your teacher)</span><input type="password" autoComplete="off" value={form.adminSetupToken} onChange={(event) => setForm({ ...form, adminSetupToken: event.target.value })} placeholder="Students can leave this blank" /></label>
             {error && <p className="form-error" role="alert">{error}</p>}
             <button disabled={busy} className="primary-button mt-2 w-full justify-center py-3.5">{busy ? 'One moment…' : mode === 'register' ? 'Create my account' : 'Sign in'}<ArrowRight className="h-4 w-4" /></button>
           </form>
@@ -340,6 +409,134 @@ function QuizPanel({ quiz, onBack, onSubmitted }) {
   )
 }
 
+function QuizManager({ subjects, onUpdated }) {
+  const [quizzes, setQuizzes] = useState([])
+  const [quizForm, setQuizForm] = useState({ subjectId: '', title: '', description: '', durationMinutes: 10 })
+  const [selectedQuizId, setSelectedQuizId] = useState('')
+  const [file, setFile] = useState(null)
+  const uploadInputRef = useRef(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [message, setMessage] = useState('')
+
+  async function loadQuizzes() {
+    const { quizzes: available } = await api('/admin/quizzes')
+    setQuizzes(available)
+    setSelectedQuizId((current) => available.some((quiz) => String(quiz.id) === current)
+      ? current
+      : String(available[0]?.id || ''))
+  }
+
+  useEffect(() => {
+    loadQuizzes().catch((requestError) => setError(requestError.message))
+  }, [])
+
+  async function createQuiz(event) {
+    event.preventDefault()
+    setBusy(true)
+    setError('')
+    setMessage('')
+    try {
+      const { quiz } = await api('/admin/quizzes', {
+        method: 'POST',
+        body: JSON.stringify(quizForm),
+      })
+      await loadQuizzes()
+      setSelectedQuizId(String(quiz.id))
+      setQuizForm({ subjectId: quizForm.subjectId, title: '', description: '', durationMinutes: 10 })
+      setMessage(`Created “${quiz.title}”. Now choose its CSV file and import the questions and answer key.`)
+      await onUpdated()
+    } catch (requestError) {
+      setError(requestError.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function importQuestions(event) {
+    event.preventDefault()
+    if (!file || !selectedQuizId) {
+      setError('Choose a quiz and a CSV file first.')
+      return
+    }
+    setBusy(true)
+    setError('')
+    setMessage('')
+    try {
+      const questions = parseQuizCsv(await file.text())
+      const currentQuiz = quizzes.find((quiz) => String(quiz.id) === selectedQuizId)
+      const confirmation = currentQuiz?.question_count
+        ? `This replaces all ${currentQuiz.question_count} existing questions in “${currentQuiz.title}”. Continue?`
+        : `Import ${questions.length} questions into “${currentQuiz?.title}”?`
+      if (!window.confirm(confirmation)) return
+      const { imported } = await api(`/admin/quizzes/${selectedQuizId}/questions`, {
+        method: 'PUT',
+        body: JSON.stringify({ questions }),
+      })
+      setFile(null)
+      if (uploadInputRef.current) uploadInputRef.current.value = ''
+      await loadQuizzes()
+      await onUpdated()
+      setMessage(`Imported ${imported} questions and answer keys. Students can now take this quiz and see their marks.`)
+    } catch (requestError) {
+      setError(requestError.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function downloadTemplate() {
+    const template = [
+      'question,choice_a,choice_b,choice_c,choice_d,correct_answer,explanation',
+      '"Which fraction equals 1/2?","2/3","3/8","4/8","5/8","C","4/8 simplifies to 1/2."',
+      '"What is 3 + 4?","5","6","7","8","C","Adding 3 and 4 gives 7."',
+    ].join('\r\n')
+    const url = URL.createObjectURL(new Blob([template], { type: 'text/csv;charset=utf-8' }))
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'study-space-quiz-template.csv'
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
+  return (
+    <div>
+      <PageHeading eyebrow="TEACHER TOOLS" title="Manage quizzes" description="Create a quiz, upload its questions and answer key, then let students practise and see their marks." />
+      {error && <p className="form-error mt-5" role="alert">{error}</p>}
+      {message && <p className="success-message mt-5" role="status">{message}</p>}
+      <div className="mt-6 grid items-start gap-5 xl:grid-cols-2">
+        <section className="section-block">
+          <SectionTitle title="1. Create a quiz" subtitle="Choose the subject students will find it under." />
+          <form onSubmit={createQuiz} className="mt-5 space-y-4">
+            <label className="form-label">Subject<select required value={quizForm.subjectId} onChange={(event) => setQuizForm({ ...quizForm, subjectId: event.target.value })}><option value="">Choose a subject</option>{subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}</select></label>
+            <label className="form-label">Quiz title<input required maxLength={180} value={quizForm.title} onChange={(event) => setQuizForm({ ...quizForm, title: event.target.value })} placeholder="e.g. Fractions practice" /></label>
+            <label className="form-label">Description<input required maxLength={500} value={quizForm.description} onChange={(event) => setQuizForm({ ...quizForm, description: event.target.value })} placeholder="What will students practise?" /></label>
+            <label className="form-label">Time allowed (minutes)<input required type="number" min="1" max="255" value={quizForm.durationMinutes} onChange={(event) => setQuizForm({ ...quizForm, durationMinutes: Number(event.target.value) })} /></label>
+            <button disabled={busy || !subjects.length} className="primary-button"><Plus className="h-4 w-4" />{busy ? 'Saving…' : 'Create quiz'}</button>
+          </form>
+        </section>
+
+        <section className="section-block">
+          <SectionTitle title="2. Upload questions & answers" subtitle="Use a CSV exported from Excel, Google Sheets, or another spreadsheet." />
+          <div className="mt-4 rounded-xl bg-[#f5f7f2] p-4 text-[12px] leading-5 text-muted">
+            Each row needs a question, four choices, the correct letter (A–D), and an explanation. Uploading replaces the selected quiz’s existing questions.
+            <button type="button" onClick={downloadTemplate} className="mt-3 flex items-center gap-2 font-bold text-green hover:underline"><Download className="h-4 w-4" /> Download CSV template</button>
+          </div>
+          <form onSubmit={importQuestions} className="mt-5 space-y-4">
+            <label className="form-label">Quiz<select required value={selectedQuizId} onChange={(event) => setSelectedQuizId(event.target.value)}><option value="">Choose a quiz</option>{quizzes.map((quiz) => <option key={quiz.id} value={quiz.id}>{quiz.subject_name} — {quiz.title} ({quiz.question_count} questions)</option>)}</select></label>
+            <label className="upload-box"><FileUp className="h-5 w-5 text-green" /><span className="text-[12px] font-bold text-ink">{file?.name || 'Choose a questions CSV file'}</span><span className="text-[10px] text-muted">CSV format · up to 100 questions</span><input ref={uploadInputRef} type="file" accept=".csv,text/csv" onChange={(event) => { setFile(event.target.files?.[0] || null); setError(''); setMessage('') }} /></label>
+            <button disabled={busy || !selectedQuizId || !file} className="primary-button"><FileUp className="h-4 w-4" />{busy ? 'Importing…' : 'Upload questions & answer key'}</button>
+          </form>
+        </section>
+      </div>
+      <section className="section-block mt-5">
+        <SectionTitle title="Your quizzes" subtitle="Draft quizzes stay hidden from students until questions are uploaded." />
+        {quizzes.length ? <div className="mt-4 divide-y divide-[#edf0ea]">{quizzes.map((quiz) => <div key={quiz.id} className="flex flex-wrap items-center justify-between gap-3 py-3"><div><p className="text-[13px] font-bold text-ink">{quiz.title}</p><p className="mt-1 text-[11px] text-muted">{quiz.subject_name} · {quiz.question_count} questions</p></div><span className={`rounded-full px-3 py-1.5 text-[10px] font-bold ${quiz.question_count ? 'bg-green-pale text-green' : 'bg-amber-50 text-amber-700'}`}>{quiz.question_count ? 'PUBLISHED' : 'DRAFT'}</span></div>)}</div> : <p className="mt-4 text-[12px] text-muted">Create a quiz to get started.</p>}
+      </section>
+    </div>
+  )
+}
+
 function ProgressPage({ progress, subjects }) {
   const stats = progress?.stats || {}
   const average = Number(stats.average_score) || 0
@@ -495,7 +692,10 @@ function App() {
   if (!user) return <AuthPage onSignedIn={setUser} />
 
   const selectedSubject = subjects.find((subject) => String(subject.id) === subjectFilter)
-  const pageTitle = { overview: 'A fresh day to learn', subjects: 'Your subjects', notes: 'Study notes', quizzes: 'Quick quizzes', progress: 'Your progress' }[page]
+  const pageTitle = { overview: 'A fresh day to learn', subjects: 'Your subjects', notes: 'Study notes', quizzes: 'Quick quizzes', progress: 'Your progress', 'manage-quizzes': 'Manage quizzes' }[page]
+  const visibleNavigation = user.role === 'admin'
+    ? [...navigation, { id: 'manage-quizzes', label: 'Manage quizzes', icon: FileUp }]
+    : navigation
 
   return (
     <div className="app-layout">
@@ -503,11 +703,11 @@ function App() {
         <div className="sidebar-brand"><Brand light /><button aria-label="Close menu" onClick={() => setMobileMenu(false)} className="mobile-close"><X className="h-5 w-5" /></button></div>
         <div className="sidebar-caption">YOUR STUDY SPACE</div>
         <nav className="sidebar-nav">
-          {navigation.map(({ id, label, icon: Icon }) => <button key={id} onClick={() => openPage(id)} className={`nav-item ${page === id ? 'nav-active' : ''}`}><Icon className="h-[17px] w-[17px]" strokeWidth={1.8} />{label}{id === 'quizzes' && <span className="nav-count">{quizzes.length}</span>}</button>)}
+          {visibleNavigation.map(({ id, label, icon: Icon }) => <button key={id} onClick={() => openPage(id)} className={`nav-item ${page === id ? 'nav-active' : ''}`}><Icon className="h-[17px] w-[17px]" strokeWidth={1.8} />{label}{id === 'quizzes' && <span className="nav-count">{quizzes.length}</span>}</button>)}
         </nav>
         <div className="sidebar-bottom">
           <div className="sidebar-nudge"><span className="nudge-spark"><Sparkles className="h-4 w-4" /></span><p className="mt-3 text-[12px] font-bold text-white">Small steps count.</p><p className="mt-1 text-[10px] leading-4 text-white/55">A few minutes of learning today can take you far.</p><button onClick={() => openPage('notes')} className="mt-3 text-[10px] font-bold text-lime">Let’s go <ArrowRight className="ml-1 inline h-3 w-3" /></button></div>
-          <div className="profile-row"><span className="profile-avatar">{initials(user.name)}</span><span className="min-w-0 flex-1"><span className="block truncate text-[12px] font-semibold text-white">{user.name}</span><span className="mt-0.5 block truncate text-[10px] text-white/50">Student</span></span><button aria-label="Sign out" title="Sign out" onClick={signOut} className="signout-button"><LogOut className="h-4 w-4" /></button></div>
+          <div className="profile-row"><span className="profile-avatar">{initials(user.name)}</span><span className="min-w-0 flex-1"><span className="block truncate text-[12px] font-semibold text-white">{user.name}</span><span className="mt-0.5 block truncate text-[10px] text-white/50">{user.role === 'admin' ? 'Teacher' : 'Student'}</span></span><button aria-label="Sign out" title="Sign out" onClick={signOut} className="signout-button"><LogOut className="h-4 w-4" /></button></div>
         </div>
       </aside>
 
@@ -531,6 +731,7 @@ function App() {
               {page === 'notes' && <div><PageHeading eyebrow="READ, REVISIT, REMEMBER" title={selectedSubject ? `${selectedSubject.name} notes` : 'Study notes'} description={selectedSubject?.description || 'Friendly explainers to help new ideas stick.'} /><div className="library-toolbar"><div className="search-box"><Search className="h-4 w-4" /><input aria-label="Search notes" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Find a note…" /></div><select aria-label="Filter by subject" value={subjectFilter} onChange={(event) => setSubjectFilter(event.target.value)}><option value="all">All subjects</option>{subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}</select></div>{filteredNotes.length ? <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{filteredNotes.map((note) => <NoteCard key={note.id} note={note} onClick={() => openNote(note.id)} />)}</div> : <EmptyState title="No notes found" text="Try a different search or choose another subject." action="Show all subjects" onAction={() => { setSearch(''); setSubjectFilter('all') }} />}</div>}
               {page === 'quizzes' && <div><PageHeading eyebrow="A LITTLE PRACTICE GOES A LONG WAY" title={selectedSubject ? `${selectedSubject.name} quizzes` : 'Quick quizzes'} description="Try a few questions and see what you already know." /><div className="library-toolbar"><div className="search-box"><Search className="h-4 w-4" /><input aria-label="Search quizzes" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Find a quiz…" /></div><select aria-label="Filter by subject" value={subjectFilter} onChange={(event) => setSubjectFilter(event.target.value)}><option value="all">All subjects</option>{subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}</select></div>{filteredQuizzes.length ? <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{filteredQuizzes.map((quiz) => <QuizCard key={quiz.id} quiz={quiz} onStart={() => setActiveQuiz(quiz)} />)}</div> : <EmptyState title="No quizzes found" text="Try a different search or choose another subject." action="Show all subjects" onAction={() => { setSearch(''); setSubjectFilter('all') }} />}</div>}
               {page === 'progress' && <ProgressPage progress={progress} subjects={subjects} />}
+              {page === 'manage-quizzes' && user.role === 'admin' && <QuizManager subjects={subjects} onUpdated={refreshData} />}
             </>
           )}
           <footer className="page-footer"><span>Made for curious minds.</span><span>Keep showing up <span className="text-green">♥</span></span></footer>

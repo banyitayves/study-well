@@ -2,7 +2,7 @@ import jwt from 'jsonwebtoken'
 import { config } from './config.js'
 
 export function createToken(user) {
-  return jwt.sign({ id: user.id, name: user.name, email: user.email }, config.jwtSecret, { expiresIn: '7d' })
+  return jwt.sign({ id: user.id, name: user.name, email: user.email, role: user.role }, config.jwtSecret, { expiresIn: '7d' })
 }
 
 export function authenticate(req, res, next) {
@@ -15,4 +15,11 @@ export function authenticate(req, res, next) {
   } catch {
     return res.status(401).json({ error: 'Your session has expired. Please sign in again.' })
   }
+}
+
+export function requireAdmin(req, res, next) {
+  if (req.user?.role !== 'admin') {
+    return res.status(403).json({ error: 'Only a teacher or administrator can manage quizzes.' })
+  }
+  return next()
 }

@@ -3,6 +3,7 @@ CREATE TABLE IF NOT EXISTS users (
   name VARCHAR(100) NOT NULL,
   email VARCHAR(190) NOT NULL UNIQUE,
   password_hash VARCHAR(255) NOT NULL,
+  role ENUM('student', 'admin') NOT NULL DEFAULT 'student',
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
@@ -50,7 +51,7 @@ CREATE TABLE IF NOT EXISTS quiz_questions (
   correct_answer CHAR(1) NOT NULL,
   explanation VARCHAR(500) NOT NULL,
   sort_order SMALLINT UNSIGNED NOT NULL DEFAULT 0,
-  INDEX idx_questions_quiz_order (quiz_id, sort_order),
+  UNIQUE INDEX uq_questions_quiz_order (quiz_id, sort_order),
   CONSTRAINT fk_questions_quiz FOREIGN KEY (quiz_id) REFERENCES quizzes(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
