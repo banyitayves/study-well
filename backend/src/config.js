@@ -11,6 +11,8 @@ export const config = {
   jwtSecret: process.env.JWT_SECRET,
   adminEmail: process.env.ADMIN_EMAIL?.trim().toLowerCase() || '',
   adminSetupToken: process.env.ADMIN_SETUP_TOKEN || '',
+  openAiApiKey: process.env.OPENAI_API_KEY || '',
+  openAiModel: process.env.OPENAI_MODEL || 'gpt-4o-mini',
   database: {
     host: process.env.DB_HOST,
     port: Number(process.env.DB_PORT) || (process.env.DB_HOST?.includes('tidbcloud.com') ? 4000 : 3306),

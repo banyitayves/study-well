@@ -38,17 +38,21 @@ Students can create an account, explore subjects and notes, take quizzes, and tr
 
 The starter library includes Mathematics, Biology, Physics, Chemistry, and English content. The first account is created through the registration form; there is no shared demo password.
 
+Document-based question generation also requires an OpenAI API key. Set `OPENAI_API_KEY` for the backend service; `OPENAI_MODEL` is optional and defaults to `gpt-4o-mini`. The extracted document text is sent to OpenAI to generate questions. Keep the key private and review generated questions and answer keys before publishing.
+
 ## Teachers: upload quizzes
 
 Set `ADMIN_EMAIL` to the teacher's account email and `ADMIN_SETUP_TOKEN` to a unique random secret of at least 24 characters in the backend environment. A teacher must choose **Teacher** at registration and provide both the configured email and setup code; student registration cannot grant teacher privileges. The code is also accepted at sign-in to activate the configured teacher account. The code is never shown in the app, and the quiz-management API checks the teacher role on the server. Keep both values private to the backend environment.
 
-In the teacher dashboard, create and publish a quiz in one step: choose a subject, enter its title and description, set the time limit, and upload the questions CSV. Download the CSV template from **Manage quizzes**. Fill one question per row with these columns:
+In the teacher dashboard, choose a subject, enter the quiz title and description, and set the time limit. To generate questions, upload a text-based PDF or `.docx` Word document (up to 10 MB), choose 5, 10, 15, or 20 questions, then select **Generate questions**. Review and edit all generated question text, choices, correct answers, and explanations before publishing. Scanned PDFs need OCR first; legacy `.doc` files are not supported. The document text is sent to the configured OpenAI service and is not stored by this app.
+
+You can also upload a questions CSV. Download the CSV template from **Manage quizzes** and fill one question per row with these columns:
 
 ```text
 question,choice_a,choice_b,choice_c,choice_d,correct_answer,explanation (optional)
 ```
 
-`correct_answer` must be `A`, `B`, `C`, or `D`. Explanations are optional. Publishing saves the quiz and its answer key together; there is no empty draft between creation and upload. Existing quizzes can still have their question set replaced. Students select answers, submit the quiz, and see their automatically calculated score and any explanations. Answer keys stay server-side until grading.
+`correct_answer` must be `A`, `B`, `C`, or `D`. Explanations are optional. Publishing saves the quiz and its answer key together; there is no empty draft between creation and upload. Existing quizzes can still have their question set replaced through the CSV workflow. Students select answers, submit the quiz, and see their automatically calculated score and any explanations. Answer keys stay server-side until grading.
 
 ## Vercel deployment and TiDB Cloud
 
@@ -61,6 +65,8 @@ The repository includes a Vercel multi-service configuration for the Vite fronte
 - `JWT_SECRET`: a unique random value of at least 32 characters
 - `ADMIN_EMAIL`: the teacher account email
 - `ADMIN_SETUP_TOKEN`: a unique random teacher setup code of at least 24 characters
+- `OPENAI_API_KEY`: an OpenAI API key for document-based question generation
+- `OPENAI_MODEL`: optional model name (defaults to `gpt-4o-mini`)
 
 In TiDB Cloud, open **My TiDB → your instance → Connect**, choose the public endpoint and Node.js connection instructions. The shared endpoint username can include an account prefix; copy it exactly. Make sure the TiDB firewall allows connections from your Vercel deployment.
 

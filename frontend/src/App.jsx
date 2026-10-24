@@ -61,7 +61,7 @@ async function api(path, options = {}) {
     response = await fetch(`/api${path}`, {
       ...options,
       headers: {
-        ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+        ...(options.body && !(options.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...options.headers,
       },
@@ -428,6 +428,10 @@ function QuizManager({ subjects, onUpdated }) {
   const uploadInputRef = useRef(null)
   const [newQuizFile, setNewQuizFile] = useState(null)
   const newQuizUploadRef = useRef(null)
+  const [documentFile, setDocumentFile] = useState(null)
+  const documentUploadRef = useRef(null)
+  const [documentQuestionCount, setDocumentQuestionCount] = useState(10)
+  const [generatedDraft, setGeneratedDraft] = useState(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
@@ -464,6 +468,70 @@ function QuizManager({ subjects, onUpdated }) {
       setQuizForm({ subjectId: quizForm.subjectId, title: '', description: '', durationMinutes: 10 })
       setNewQuizFile(null)
       if (newQuizUploadRef.current) newQuizUploadRef.current.value = ''
+      setMessage(`Published "${quiz.title}" with ${imported} questions. Students can take it and receive their marks automatically.`)
+      await onUpdated()
+    } catch (requestError) {
+      setError(requestError.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function generateFromDocument() {
+    if (!documentFile) {
+      setError('Choose a PDF or Word (.docx) document first.')
+      return
+    }
+    setBusy(true)
+    setError('')
+    setMessage('')
+    setGeneratedDraft(null)
+    try {
+      const formData = new FormData()
+      formData.append('document', documentFile)
+      formData.append('subjectId', quizForm.subjectId)
+      formData.append('title', quizForm.title)
+      formData.append('description', quizForm.description)
+      formData.append('durationMinutes', String(quizForm.durationMinutes))
+      formData.append('questionCount', String(documentQuestionCount))
+      const { questions } = await api('/admin/quizzes/generate', {
+        method: 'POST',
+        body: formData,
+      })
+      setGeneratedDraft({ quiz: { ...quizForm }, questions })
+      setMessage(`Generated ${questions.length} questions from "${documentFile.name}". Review the questions and answer keys below before publishing.`)
+    } catch (requestError) {
+      setError(requestError.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function updateGeneratedQuestion(index, field, value) {
+    setGeneratedDraft((current) => ({
+      ...current,
+      questions: current.questions.map((question, questionIndex) => (
+        questionIndex === index ? { ...question, [field]: value } : question
+      )),
+    }))
+  }
+
+  async function publishGeneratedQuiz() {
+    if (!generatedDraft) return
+    setBusy(true)
+    setError('')
+    setMessage('')
+    try {
+      const { quiz, imported } = await api('/admin/quizzes/import', {
+        method: 'POST',
+        body: JSON.stringify({ ...generatedDraft.quiz, questions: generatedDraft.questions }),
+      })
+      await loadQuizzes()
+      setSelectedQuizId(String(quiz.id))
+      setQuizForm({ subjectId: generatedDraft.quiz.subjectId, title: '', description: '', durationMinutes: 10 })
+      setGeneratedDraft(null)
+      setDocumentFile(null)
+      if (documentUploadRef.current) documentUploadRef.current.value = ''
       setMessage(`Published "${quiz.title}" with ${imported} questions. Students can take it and receive their marks automatically.`)
       await onUpdated()
     } catch (requestError) {
@@ -543,21 +611,50 @@ function QuizManager({ subjects, onUpdated }) {
 
   return (
     <div>
-      <PageHeading eyebrow="TEACHER TOOLS" title="Manage quizzes" description="Create a quiz, upload its questions and answer key, then let students practise and see their marks." />
+      <PageHeading eyebrow="TEACHER TOOLS" title="Manage quizzes" description="Create quizzes from a document or CSV, review the answer key, and publish them for students." />
       {error && <p className="form-error mt-5" role="alert">{error}</p>}
       {message && <p className="success-message mt-5" role="status">{message}</p>}
       <section className="section-block mt-6">
-        <SectionTitle title="Create and publish a quiz" subtitle="Upload the questions and answer key together. Students can take it as soon as it is saved." />
+        <SectionTitle title="Create a quiz" subtitle="Upload a CSV or generate questions from a PDF or Word document. Review generated answers before publishing." />
         <form onSubmit={createAndPublishQuiz} className="mt-5 grid gap-4 sm:grid-cols-2">
           <label className="form-label">Subject<select required value={quizForm.subjectId} onChange={(event) => setQuizForm({ ...quizForm, subjectId: event.target.value })}><option value="">Choose a subject</option>{subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}</select></label>
           <label className="form-label">Quiz title<input required maxLength={180} value={quizForm.title} onChange={(event) => setQuizForm({ ...quizForm, title: event.target.value })} placeholder="e.g. Fractions practice" /></label>
           <label className="form-label sm:col-span-2">Description<input required maxLength={500} value={quizForm.description} onChange={(event) => setQuizForm({ ...quizForm, description: event.target.value })} placeholder="What will students practise?" /></label>
           <label className="form-label">Time allowed (minutes)<input required type="number" min="1" max="255" value={quizForm.durationMinutes} onChange={(event) => setQuizForm({ ...quizForm, durationMinutes: Number(event.target.value) })} /></label>
-          <div className="rounded-xl bg-[#f5f7f2] p-4 text-[11px] leading-5 text-muted">CSV columns: question, four choices, and correct_answer (A-D). Explanations are optional. Scores are marked automatically from the answer key.</div>
+          <div className="rounded-xl bg-[#f5f7f2] p-4 text-[11px] leading-5 text-muted">CSV columns: question, four choices, and correct_answer (A-D). Or generate questions from a text-based PDF or .docx Word document. Scanned PDFs need OCR first.</div>
           <label className="upload-box sm:col-span-2"><FileUp className="h-5 w-5 text-green" /><span className="text-[12px] font-bold text-ink">{newQuizFile?.name || 'Choose a questions CSV file'}</span><span className="text-[10px] text-muted">CSV format - up to 100 questions</span><input ref={newQuizUploadRef} type="file" accept=".csv,text/csv" onChange={(event) => { setNewQuizFile(event.target.files?.[0] || null); setError(''); setMessage('') }} /></label>
           <button type="button" onClick={downloadTemplate} className="text-left text-[11px] font-bold text-green hover:underline">Download CSV template</button>
           <button disabled={busy || !subjects.length || !newQuizFile} className="primary-button sm:col-span-2"><Plus className="h-4 w-4" />{busy ? 'Publishing...' : 'Create quiz and publish'}</button>
+          <div className="sm:col-span-2 border-t border-[#edf0ea] pt-5">
+            <h3 className="font-display text-[15px] font-bold text-ink">Or generate questions from a document</h3>
+            <p className="mt-1 text-[11px] leading-5 text-muted">The document is sent to the configured AI service to create draft questions. You can edit every question and answer before publishing.</p>
+          </div>
+          <label className="upload-box sm:col-span-2"><FileUp className="h-5 w-5 text-green" /><span className="text-[12px] font-bold text-ink">{documentFile?.name || 'Choose a PDF or Word document'}</span><span className="text-[10px] text-muted">PDF or .docx · up to 10 MB · text-based PDF only</span><input ref={documentUploadRef} type="file" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={(event) => { setDocumentFile(event.target.files?.[0] || null); setGeneratedDraft(null); setError(''); setMessage('') }} /></label>
+          <label className="form-label">Number of questions<select value={documentQuestionCount} onChange={(event) => setDocumentQuestionCount(Number(event.target.value))}>{[5, 10, 15, 20].map((count) => <option key={count} value={count}>{count} questions</option>)}</select></label>
+          <button type="button" disabled={busy || !subjects.length || !documentFile} onClick={generateFromDocument} className="secondary-button justify-center sm:justify-self-start"><Sparkles className="h-4 w-4" />{busy ? 'Generating...' : 'Generate questions'}</button>
         </form>
+        {generatedDraft && <section className="mt-6 border-t border-[#edf0ea] pt-6">
+          <SectionTitle title={`Review ${generatedDraft.questions.length} generated questions`} subtitle="Edit any wording, choices, or correct answers. Nothing is published until you confirm." />
+          <div className="mt-4 space-y-4">
+            {generatedDraft.questions.map((question, index) => (
+              <article key={`generated-${index}`} className="rounded-xl border border-[#e6ebe3] bg-[#fbfcfa] p-4">
+                <label className="form-label">Question {index + 1}<textarea rows="2" maxLength="500" value={question.prompt} onChange={(event) => updateGeneratedQuestion(index, 'prompt', event.target.value)} className="mt-2 w-full resize-y rounded-xl border border-[#e2e9e1] bg-white px-3 py-2 text-[12px] text-ink outline-none focus:border-[#6e9a79]" /></label>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  {['A', 'B', 'C', 'D'].map((letter) => {
+                    const field = `choice${letter}`
+                    return <label key={letter} className="form-label">Choice {letter}<input maxLength="255" value={question[field]} onChange={(event) => updateGeneratedQuestion(index, field, event.target.value)} /></label>
+                  })}
+                  <label className="form-label">Correct answer<select value={question.correctAnswer} onChange={(event) => updateGeneratedQuestion(index, 'correctAnswer', event.target.value)}>{['A', 'B', 'C', 'D'].map((letter) => <option key={letter} value={letter}>{letter}</option>)}</select></label>
+                  <label className="form-label sm:col-span-2">Explanation<textarea rows="2" maxLength="500" value={question.explanation || ''} onChange={(event) => updateGeneratedQuestion(index, 'explanation', event.target.value)} className="mt-2 w-full resize-y rounded-xl border border-[#e2e9e1] bg-white px-3 py-2 text-[12px] text-ink outline-none focus:border-[#6e9a79]" /></label>
+                </div>
+              </article>
+            ))}
+          </div>
+          <div className="mt-4 flex flex-wrap gap-3">
+            <button type="button" disabled={busy} onClick={publishGeneratedQuiz} className="primary-button"><Check className="h-4 w-4" />{busy ? 'Publishing...' : 'Review complete — publish quiz'}</button>
+            <button type="button" disabled={busy} onClick={() => setGeneratedDraft(null)} className="secondary-button">Discard generated questions</button>
+          </div>
+        </section>}
       </section>
       <div className="mt-6 grid items-start gap-5 xl:grid-cols-2">
         <section className="section-block">
